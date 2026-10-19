@@ -34,7 +34,7 @@ async function runtime(type, options = {}) {
   return { ...config, ...await (options.services?.aiTtsModel || ttsService).resolveTtsRuntime({ ttsConfig: config || {}, env: {} }) };
 }
 function snapshot(config, type) {
-  const allowed = ['enabled', 'provider', 'providerName', 'protocol', 'modelId', 'voiceId', 'doubao', 'backend', 'builtin', 'ttsConcurrency', 'ttsQueueIntervalMs', 'supportsMultimodal'];
+  const allowed = ['enabled', 'provider', 'providerName', 'protocol', 'modelId', 'voiceId', 'doubao', 'backend', 'builtin', 'ttsConcurrency', 'ttsQueueIntervalMs', 'supportsMultimodal', 'localIndexTts', 'alignmentConfig'];
   const parameters = Object.fromEntries(allowed.filter(key => config[key] !== undefined).map(key => [key, structuredClone(config[key])]));
   const configured = type === 'tts' ? config.configured === true : !!(config.enabled && config.baseUrl && config.modelId && (config.apiKey || (type === 'asr' && ['funasr', 'firered'].includes(config.backend))));
   return { type, configured, provider: config.provider || '', modelId: config.modelId || '', voiceId: config.voiceId || '',
@@ -51,7 +51,7 @@ async function resolveFrozen(state, types, options = {}) {
     if (!current.configured) throw new ErrorType('MODEL_NOT_CONFIGURED', ({text:'分析',image:'图片',tts:'配音',asr:'转写'})[type] + '模型尚未配置，请到设置中心配置并在本任务中应用。');
     result[type] = config;
   }
-  if (result.tts && !['doubao','minimax','mimo'].includes(result.tts.provider)) throw new ErrorType('MODEL_CAPABILITY', '当前配音服务尚未接入完整音频合同，请在设置中选择已支持的豆包、MiniMax 或 MiMo。');
+  if (result.tts && !['doubao','minimax','mimo','indextts'].includes(result.tts.provider)) throw new ErrorType('MODEL_CAPABILITY', '当前配音服务尚未接入完整音频合同，请在设置中选择 IndexTTS、豆包、MiniMax 或 MiMo。');
   if (result.tts?.provider === 'mimo' && !result.asr) {
     const asr = await resolveFrozen(state, ['asr'], options);
     if (!['funasr', 'firered'].includes(asr.asr.backend)) throw new ErrorType('MODEL_CAPABILITY', 'MiMo 不提供原生字幕，需要当前配置的 FireRed 字词对齐或 FunASR 句级转写；请先配置，应用不会自动更换模型。');
@@ -63,6 +63,7 @@ function publicSnapshot(value) {
   return { type: value.type, configured: value.configured, provider: value.provider, modelId: value.modelId, voiceId: value.voiceId, hash: value.hash };
 }
 function classify(response, status, sent, label) {
+  if (response?.model?.provider === 'indextts') return new ErrorType(response.code || 'INDEXTTS_FAILED', response.message || '本地配音失败，音频已保留，请检查本地服务。');
   if (!sent && ['TTS_CONFIG_INVALID','TTS_INPUT_INVALID','TTS_NOT_CONFIGURED'].includes(response?.code)) {
     return new ErrorType(response.code, '配音配置或输入不符合当前服务要求，请检查模型、音色说明和正文后重试。');
   }
@@ -181,9 +182,10 @@ async function narration(record, chunk, config, attempt, options = {}) {
     text:chunk.text, language, durationSeconds:Math.min(80, Math.max(1, Math.ceil(chunk.text.length / (language === 'zh-CN' ? 4 : 12)))),
     ttsConfig:{...config, enabled:true}, env:{}, nativeWordSubtitles:config.provider !== 'mimo',
     maxRetries:0, requestTimeoutMs:180000, fetchImpl,
+    localTake: chunk.identity,
   })); } catch { throw classify(null, observed.status, true, '配音服务'); }
   const complete = response?.success && Buffer.isBuffer(response.audioBuffer) && response.audioBuffer.length
-    && (config.provider === 'mimo' || response.nativeSubtitles);
+    && (config.provider === 'mimo' || response.nativeSubtitles || response.alignedSubtitles);
   const error = complete ? null : classify(response, response?.httpStatus || observed.status, observed.sent, '配音服务');
   return {...response, error};
 }

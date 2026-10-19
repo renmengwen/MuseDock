@@ -130,7 +130,8 @@ async function transcribeFunasrAudio(audioPath, config, options = {}) {
       response = await recordedFetch(options.fetchImpl || globalThis.fetch, { category: 'transcription' })(endpoint, {
         method: 'POST', body, redirect: 'error',
         headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
-        signal: AbortSignal.timeout(options.requestTimeoutMs || 300000),
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(options.requestTimeoutMs || 300000)])
+          : AbortSignal.timeout(options.requestTimeoutMs || 300000),
       });
       if (!response.ok) {
         if (options.normalizePayload && response.status === 422) {

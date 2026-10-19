@@ -2,6 +2,8 @@ const aiModelConfig = require('./aiModelConfig');
 const { callDoubaoTts, DOUBAO_MODEL, normalizeDoubaoSettings } = require('./doubaoTts');
 const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
 const { callMiniMaxNativeTts } = require('./minimaxNativeTts');
+const { resolveIndexTts } = require('./indexTtsSettings');
+const { callIndexTts } = require('./indexTts');
 
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
 const DEFAULT_MIMO_TTS_MODEL = 'mimo-v2.5-tts';
@@ -107,6 +109,12 @@ async function resolveTtsRuntime(options = {}) {
   const storedConfig = options.ttsConfig || await aiModelConfig.getRuntimeConfig('tts', {
     configPath: options.configPath,
   });
+  if (storedConfig?.provider === 'indextts' && (!env.TTS_PROVIDER || env.TTS_PROVIDER === 'indextts')) {
+    const localIndexTts = resolveIndexTts(storedConfig);
+    return { ...storedConfig, localIndexTts, configured: storedConfig.enabled === true && localIndexTts.configured,
+      provider: 'indextts', modelId: 'IndexTTS-2.5', baseUrl: 'local://indextts', apiKey: '',
+      voiceId: 'reference_audio', ttsConcurrency: 1, ttsQueueIntervalMs: 0 };
+  }
   const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
   const provider = normalizeProvider(env.TTS_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
   const providerName = normalizeProvider(storedConfig?.providerName);
@@ -151,6 +159,12 @@ async function callTtsModel(options = {}) {
     ? (requestedVoice && requestedVoice !== DEFAULT_MIMO_VOICE ? requestedVoice : runtime.voiceId)
     : (requestedVoice || DEFAULT_MIMO_VOICE);
   const model = toModelInfo(runtime.provider, runtime.modelId);
+
+  if (text && runtime.provider === 'indextts') {
+    return enqueueTtsRequest(() => callIndexTts({ ...options, text, runtime }), {
+      concurrency: 1, intervalMs: 0, queueKey: 'local-indextts',
+    });
+  }
 
   if (text && runtime.provider === 'doubao') {
     return enqueueTtsRequest(() => callDoubaoTts({ ...options, text, runtime }), {

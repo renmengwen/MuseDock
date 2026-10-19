@@ -64,8 +64,8 @@ async function narration(ctx) {
             const raw=await store.putBuffer(current,response.audioBuffer,{kind:'audio_raw',ext:entry.format,mime:entry.format==='mp3'?'audio/mpeg':'audio/'+entry.format},ctx.options.rootDir);
             entry.rawId=raw.id;
           }
-          if(response.nativeSubtitles) {
-            const evidence=await store.putBuffer(current,Buffer.from(JSON.stringify(response.nativeSubtitles)),{kind:'subtitle_evidence',ext:'json',mime:'application/json'},ctx.options.rootDir);
+          if(response.nativeSubtitles || response.alignedSubtitles) {
+            const evidence=await store.putBuffer(current,Buffer.from(JSON.stringify(response.alignedSubtitles || response.nativeSubtitles)),{kind:'subtitle_evidence',ext:'json',mime:'application/json'},ctx.options.rootDir);
             entry.evidenceId=evidence.id;
           }
           current.illustrated.audioCache[chunk.identity]=entry;
@@ -93,9 +93,24 @@ async function narration(ctx) {
         });
       record=await ctx.read();cached=record.illustrated.audioCache[chunk.identity];
     }
+    if(frozen.tts.provider==='indextts' && !cached.evidenceId) {
+      await ctx.progress('正在复用已保存配音，重新对齐真实时间戳...');
+      const raw=await store.mediaFile(record,cached.rawId,ctx.options.rootDir,{checkHash:true});
+      const evidence=await (ctx.options.services?.alignIndexTtsAudio || require('../../ai/indexTts').alignIndexTtsAudio)(raw.path,
+        cached.durationMs,chunk.text,frozen.tts.alignmentConfig,{workDir:path.join(ctx.directory,chunk.id)});
+      record=await ctx.update(async current=>{
+        const artifact=await store.putBuffer(current,Buffer.from(JSON.stringify(evidence)),{kind:'subtitle_evidence',ext:'json',mime:'application/json'},ctx.options.rootDir);
+        current.illustrated.audioCache[chunk.identity].evidenceId=artifact.id;
+      });
+      cached=record.illustrated.audioCache[chunk.identity];
+    }
     if(!cached.evidenceId) throw new contract.ErrorType('NARRATION_EVIDENCE_INVALID','音频缺少同请求字幕证据，请核实原请求后处理；不会自动再次合成。',409);
     const evidence=await readJsonArtifact(record,cached.evidenceId,ctx.options);
-    const partTiming=frozen.tts.provider==='mimo'?timing.asrSegmentTiming(chunk,evidence,cached.durationMs,s.settings):timing.nativeSegmentTiming(chunk,evidence,cached.durationMs,s.settings);
+    if(frozen.tts.provider==='indextts') {
+      const raw=await store.mediaFile(record,cached.rawId,ctx.options.rootDir,{checkHash:true});
+      if(evidence.audioSha256!==raw.artifact.sha256) throw new contract.ErrorType('NARRATION_EVIDENCE_INVALID','声学时间戳与当前配音音频不匹配。');
+    }
+    const partTiming=['mimo','indextts'].includes(frozen.tts.provider)?timing.asrSegmentTiming(chunk,evidence,cached.durationMs,s.settings):timing.nativeSegmentTiming(chunk,evidence,cached.durationMs,s.settings);
     const segment={...cached,...chunk,timing:partTiming};
     segments.push(segment);
     await ctx.update(current=>{

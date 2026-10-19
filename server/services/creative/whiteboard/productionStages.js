@@ -49,6 +49,7 @@ async function narrationStage(ctx, artifact) {
   const media = record.whiteboard.media;
   const silent = artifact.productionPlan.narrationMode === 'disabled';
   const planned = silent && artifact.timingKind === 'provisional';
+  const localVoice = ctx.voice.runtime?.provider === 'indextts';
   if (!silent && ctx.voice.service.contractHash !== media.voiceService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白服务或声音参数已变化，请重新确认制作设置后生成新版本。', 409);
   const inputIdentity = sha256({ text: artifact.narrationText, language: artifact.narrationLanguage, cues: artifact.cues,
     ...(artifact.opening ? { opening: artifact.opening } : {}),
@@ -61,7 +62,7 @@ async function narrationStage(ctx, artifact) {
   // 显示规则升级只在本地重建字幕，语音请求身份保持不变，继续使用同次原始证据。
   const sources = [media, ...[...(record.whiteboard.mediaHistory || [])].reverse().filter(history => history.contractVersion === store.MEDIA_CONTRACT)];
   const reusable = sources.flatMap(source => [...source.attempts].reverse())
-    .find(attempt => attempt.stage === 'full_narration' && attempt.inputIdentity === inputIdentity && attempt.received?.raw && attempt.received?.native);
+    .find(attempt => attempt.stage === 'full_narration' && attempt.inputIdentity === inputIdentity && attempt.received?.raw && (attempt.received?.native || localVoice));
   const previous = !reusable && sources.map(source => source.current.full_narration)
     .find(binding => binding?.inputIdentity === inputIdentity && binding.audio && binding.native);
   if (previous) await store.validateBinding(record, previous, ctx.rootDir);
@@ -85,13 +86,17 @@ async function narrationStage(ctx, artifact) {
         scenes: narrationScenes(artifact),
         ttsConfig: { ...ctx.voice.runtime, enabled: true }, env: {}, nativeWordSubtitles: true,
         maxRetries: 0, requestTimeoutMs: 180000, fetchImpl: ctx.services.fetchImpl, signal: ctx.processOptions.signal,
+        localTake: inputIdentity,
       });
       if (result.audioBuffer) {
         const raw = path.join(directory, 'provider-audio.bin');
         await fsp.writeFile(raw, result.audioBuffer, { flag: 'wx' });
         const files = { raw: { path: raw, kind: 'provider_audio', name: '同请求原始音频', mime: 'application/octet-stream' } };
-        if (result.nativeSubtitles) files.native = { path: await ctx.jsonFile(item, 'provider-subtitles.json', result.nativeSubtitles),
-          kind: 'provider_subtitles', name: '同请求原生字级字幕', mime: 'application/json' };
+        if (result.narrationReview) files.review = { path: await ctx.jsonFile(item, 'narration-review.json', result.narrationReview),
+          kind: 'narration_review', name: '旁白识别对照（待听审）', mime: 'application/json' };
+        const subtitles = result.alignedSubtitles || result.nativeSubtitles;
+        if (subtitles) files.native = { path: await ctx.jsonFile(item, 'provider-subtitles.json', subtitles),
+          kind: 'provider_subtitles', name: result.alignedSubtitles ? 'FireRed 后处理声学时间戳' : '同请求原生字级字幕', mime: 'application/json' };
         received = (await ctx.publish(item, files)).result;
       }
       if (!result.success || !received?.raw || !received?.native) {
@@ -102,16 +107,31 @@ async function narrationStage(ctx, artifact) {
     }
     record = await ctx.read();
     const rawPath = await ctx.filePath(record, received.raw);
-    const evidence = await store.readData(record, received.native, ctx.rootDir);
+    let evidence = received.native ? await store.readData(record, received.native, ctx.rootDir) : null;
     if (saved) await ctx.change(current => {
       const existing = new Set(current.whiteboard.media.artifacts.map(file => file.id));
-      for (const file of [received.raw, received.native]) if (!existing.has(file.id)) {
+      for (const file of [received.raw, received.native].filter(Boolean)) if (!existing.has(file.id)) {
         current.whiteboard.media.artifacts.push(structuredClone(file)); existing.add(file.id);
       }
       current.whiteboard.media.attempts.find(attempt => attempt.id === item.id).received = received;
     });
     const output = path.join(directory, 'narration.wav');
     audioInfo = await ctx.tools.normalizeAudio(rawPath, output, ctx.runtime, ctx.processOptions);
+    if (!evidence && localVoice) {
+      try { evidence = await (ctx.services.alignIndexTtsAudio || require('../../ai/indexTts').alignIndexTtsAudio)(rawPath,
+        audioInfo.durationMs, artifact.narrationText, ctx.voice.runtime.alignmentConfig,
+        { workDir: path.join(directory, 'asr'), signal: ctx.processOptions.signal }); }
+      catch (error) {
+        if (error.narrationReview) await ctx.publish(item, { review: { path: await ctx.jsonFile(item, 'narration-review.json', error.narrationReview),
+          kind: 'narration_review', name: '旁白识别对照（待听审）', mime: 'application/json' } });
+        throw new WhiteboardError(error.code || 'ASR_ALIGNMENT_FAILED', error.message);
+      }
+      received.native = (await ctx.publish(item, { native: { path: await ctx.jsonFile(item, 'aligned-subtitles.json', evidence),
+        kind: 'provider_subtitles', name: 'FireRed 后处理声学时间戳', mime: 'application/json' } })).result.native;
+    }
+    if (evidence?.kind === 'post_asr_sentence_timestamps' && evidence.audioSha256 !== await ctx.tools.hashFile(rawPath)) {
+      throw new WhiteboardError('NARRATION_EVIDENCE_INVALID', '后处理时间戳与当前原始音频哈希不一致，不能使用。');
+    }
     if (evidence.durationMs && Math.abs(evidence.durationMs - audioInfo.durationMs) > 120) throw new WhiteboardError('NARRATION_EVIDENCE_INVALID', '语音响应声明的时长与实际音频不一致。音频已保留，请核实。');
     timing = buildNarrationTiming(artifact, evidence, audioInfo.durationMs);
     timing.audioSha256 = await ctx.tools.hashFile(output);

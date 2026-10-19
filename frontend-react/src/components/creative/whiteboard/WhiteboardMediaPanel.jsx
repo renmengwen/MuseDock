@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button.jsx';
 import { useLocalFileActions } from '@/hooks/useLocalFileActions.js';
 import { CreativeVideoPreview } from '../CreativeVideoPreview.jsx';
 import { WhiteboardSceneTable } from './WhiteboardSceneTable.jsx';
+import { WhiteboardNarrationReview } from './WhiteboardNarrationReview.jsx';
+import { retainedNarrationAttempts } from './narrationReviewFiles.js';
 
 const PANELS = [ ['full_narration', '旁白'], ['lineart_generation', '线稿'], ['annotation_drafting', '落墨'], ['scene_render', '单幕'], ['final_delivery', '成片'] ];
 export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false,
-  onSaveLineartPrompt, promptSavingDisabled = false }) {
+  onSaveLineartPrompt, promptSavingDisabled = false, onSaveAnnotation, annotationSavingDisabled = false }) {
   const [tab, setTab] = useState(media.stage);
   const detailsOpen = useRef(false);
   const onDetailsOpenChange = useCallback(open => { detailsOpen.current = open; }, []);
@@ -22,6 +24,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
   const current = media.current;
   const canvas = { width: media.recipe?.width || 1920, height: media.recipe?.height || 1080 };
   const narration = current.full_narration;
+  const retainedNarration = retainedNarrationAttempts(media);
   const silent = media.narrationMode === 'disabled' || (narration && !narration.audio);
   const final = current.final_delivery;
   const openFile = (file, label, target = 'file') => url(file) && <Button variant="outline" size="sm" className="max-[760px]:min-h-11"
@@ -45,7 +48,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
   const annotationScenes = (current.annotation_drafting?.scenes || scenes.map(scene =>
     media.annotations?.[scene.id] || lowCoverageByScene.get(scene.id) || { sceneId: scene.id })).map(scene => {
     const attempts = annotationAttempts.get(scene.sceneId) || [];
-    return { ...scene, attempts, attempt: attempts.at(-1) };
+    return { ...scene, image: media.lineart?.[scene.sceneId]?.image, attempts, attempt: attempts.at(-1) };
   });
   const lineartAttempts = new Map((media.attempts || []).filter(attempt => attempt.stage === 'lineart_generation').map(attempt => [attempt.sceneId, attempt]));
   const lineartBindings = new Map((current.lineart_generation?.scenes || Object.values(media.lineart || {})).map(scene => [scene.sceneId, scene]));
@@ -65,13 +68,15 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
       <Tabs value={tab} onValueChange={value => { setTab(value); fileActions.clearMessage(); }} className="min-w-0 gap-4">
         <TabsList className="grid h-auto w-full grid-cols-5" aria-label="媒体阶段">{PANELS.map(([id, label]) => <TabsTrigger key={id} value={id} className="min-h-10 px-1 text-xs">{silent && id === 'full_narration' ? '字幕' : label}</TabsTrigger>)}</TabsList>
         <TabsContent value="full_narration" className="min-w-0">
+          {retainedNarration.length ? <div className="mb-4 grid gap-3">{retainedNarration.map(attempt => <WhiteboardNarrationReview key={attempt.id} attempt={attempt} />)}</div> : null}
           {narration ? <div className="grid gap-4">
             <p className="m-0 text-sm">{narration.timingKind === 'planned' ? '计划时长' : '时间轴时长'} <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : narration.timingKind === 'planned' ? ' · 无旁白，使用计划时间轴' : ' · 无旁白，使用 SRT 时间轴'}</p>
             {narration.audio ? <audio controls controlsList="nodownload" preload="metadata" src={url(narration.audio)} className="w-full" aria-label="完整白板旁白" /> : null}
             <div className="flex flex-wrap gap-2">{openFile(narration.audio, '打开完整旁白')}{openFile(final?.subtitles || narration.subtitles, '打开字幕 SRT')}{openFile(narration.audio || final?.subtitles || narration.subtitles, '打开所在文件夹', 'folder')}</div>
-            <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : narration.timingKind === 'planned' ? '按已确认的目标时长与文本长度安排字幕和动画，未生成旁白。请检查字幕阅读节奏和分镜时长。' : '使用输入 SRT 的时间轴，未生成旁白。'}</p>
+            {narration.humanAcceptance ? <p className="m-0 text-xs leading-6 text-fg-3">本次音频已经人工试听确认；字幕按确认原文校订，时间沿用原始声学边界。原始识别与校订记录已保留。</p> : null}
+            <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? narration.timingKind === 'asr_words' ? '字幕文字来自已确认正文，时间来自绑定当前音频的 FireRed 独立识别与 CTC 声学对齐。' : '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : narration.timingKind === 'planned' ? '按已确认的目标时长与文本长度安排字幕和动画，未生成旁白。请检查字幕阅读节奏和分镜时长。' : '使用输入 SRT 的时间轴，未生成旁白。'}</p>
             {media.bgm ? <p className="m-0 text-xs leading-6 text-fg-3">已开启背景音乐，将在最终成片中混入；此处仅检查旁白和字幕。</p> : null}
-          </div> : empty}
+          </div> : retainedNarration.length ? null : empty}
         </TabsContent>
         {PANELS.slice(1, 4).map(([stage]) => <TabsContent key={stage} value={stage} className="min-w-0">
           {stage === 'annotation_drafting' && pendingLowCoverage ? <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/25 p-3 text-xs leading-6 text-danger" role="alert">
@@ -79,11 +84,12 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
             <div className="grid gap-2"><span>有 {lowCoverageScenes.length} 幕的落墨标注未完整覆盖线稿（不足 97%）。预览会展示当前落墨效果，并用红色标出遗漏墨迹。接受后遗漏部分保持空白，不会在片尾补显。</span>
               {onReviewLowCoverage ? <Button variant="outline" size="sm" disabled={actionsDisabled} className="justify-self-start" onClick={onReviewLowCoverage}>查看预览并决定是否接受</Button> : null}</div>
           </div> : null}
-          <WhiteboardSceneTable key={stage === 'lineart_generation' ? `${media.id}:${stage}` : current[stage]?.identity || (stage === 'annotation_drafting' && pendingLowCoverage ? 'low-coverage' : stage)}
+          <WhiteboardSceneTable key={`${media.id}:${stage}`}
             stage={stage} scenes={stage === 'annotation_drafting' ? annotationScenes : stage === 'lineart_generation' ? lineartScenes : renderedScenes}
             sceneTitles={sceneTitles} canvas={canvas} getUrl={url} renderOpenFile={openFile} fileStatus={fileStatus} onFileContextChange={fileActions.clearMessage}
             onReviewLowCoverage={onReviewLowCoverage} onRecoverAnnotationPreview={onRecoverAnnotationPreview}
             recoveringPreview={recoveringPreview} actionsDisabled={actionsDisabled}
+            onSaveAnnotation={onSaveAnnotation} annotationSavingDisabled={annotationSavingDisabled}
             onSaveLineartPrompt={onSaveLineartPrompt} promptSavingDisabled={promptSavingDisabled} onDetailsOpenChange={onDetailsOpenChange} />
         </TabsContent>)}
         <TabsContent value="final_delivery" className="min-w-0">

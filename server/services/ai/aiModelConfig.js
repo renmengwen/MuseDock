@@ -1,6 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const { normalizeDoubaoSettings } = require('./doubaoTts');
+const { BUILTIN_INDEXTTS_REF, normalizeIndexTts } = require('./indexTtsSettings');
 
 const DEFAULT_CONFIG_PATH = path.join(require('../../dataRoot'), 'data/config/ai-models.json');
 
@@ -91,7 +92,8 @@ function normalizeActive(input = {}) {
   const active = {};
   for (const type of MODEL_TYPES) {
     const raw = normalizeString(input[type]);
-    active[type] = type === 'asr' && (!raw || raw === BUILTIN_FUNASR_REF) ? BUILTIN_FIRERED_REF : raw;
+    active[type] = type === 'asr' && (!raw || raw === BUILTIN_FUNASR_REF) ? BUILTIN_FIRERED_REF
+      : type === 'tts' && !raw ? BUILTIN_INDEXTTS_REF : raw;
   }
   return active;
 }
@@ -125,7 +127,8 @@ function normalizeStoredConfig(input = {}, previous = {}) {
     pythonPath: normalizeString(fireRedInput?.pythonPath ?? previous.localFireRed?.pythonPath),
     modelCache: normalizeString(fireRedInput?.modelCache ?? previous.localFireRed?.modelCache),
   };
-  return { providers, active, skipValidation, analysisStreaming, localAsr, localFireRed };
+  const localIndexTts = normalizeIndexTts(input.localIndexTts, previous.localIndexTts);
+  return { providers, active, skipValidation, analysisStreaming, localAsr, localFireRed, localIndexTts };
 }
 
 function migrateOldConfig(old) {
@@ -208,6 +211,7 @@ function toPublicConfig(stored) {
     analysisStreaming: config.analysisStreaming,
     localAsr: config.localAsr,
     localFireRed: config.localFireRed,
+    localIndexTts: config.localIndexTts,
   };
 }
 
@@ -233,6 +237,13 @@ function resolveActiveConfig(type, stored) {
   const config = normalizeStoredConfig(stored);
   const activeRef = config.active[type];
   if (!activeRef) return null;
+  if (type === 'tts' && activeRef === BUILTIN_INDEXTTS_REF) {
+    return { enabled: true, builtin: true, provider: 'indextts', providerName: 'IndexTTS 2.5（本地）',
+      protocol: 'local-process', modelId: 'IndexTTS-2.5', apiKey: '', baseUrl: 'local://indextts',
+      voiceId: 'reference_audio', localIndexTts: config.localIndexTts,
+      alignmentConfig: { ...config.localFireRed, enabled: true, builtin: true, provider: 'firered', backend: 'firered',
+        modelId: 'fireredasr2-aed', apiKey: '' }, ttsConcurrency: 1, ttsQueueIntervalMs: 0 };
+  }
   if (type === 'asr' && activeRef === BUILTIN_FIRERED_REF) {
     return {
       enabled: true, builtin: true, provider: 'firered', providerName: 'FireRed（本地）',
@@ -360,6 +371,7 @@ module.exports = {
   BUILTIN_FUNASR_REF,
   DEFAULT_FUNASR_BASE_URL,
   BUILTIN_FIRERED_REF,
+  BUILTIN_INDEXTTS_REF,
   DEFAULT_FIRERED_BASE_URL,
   getPublicConfig,
   resolveProviderDraft,

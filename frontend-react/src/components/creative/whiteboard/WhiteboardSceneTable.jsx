@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils.js';
 import { WhiteboardCoverageImages } from './WhiteboardCoverageReview.jsx';
 import { WhiteboardRequestDetails } from './WhiteboardRequestDetails.jsx';
 import { WhiteboardLineartPromptEditor } from './WhiteboardLineartPromptEditor.jsx';
+import { WhiteboardAnnotationEditor } from './WhiteboardAnnotationEditor.jsx';
+import { WhiteboardFitFrame } from './WhiteboardFitFrame.jsx';
 
 const STAGES = {
   lineart_generation: { label: '线稿', file: 'image', summary: '状态 / 文件', description: '查看、编辑并保存本幕线稿提示词，生成后可在这里检查画面。' },
@@ -57,14 +59,15 @@ function previewStyle(canvas) {
     ...(canvas.height > canvas.width ? { maxWidth: `${60 * canvas.width / canvas.height}dvh` } : {}) };
 }
 
-function SceneImage({ src, alt, label, canvas }) {
+function SceneImage({ src, alt, label, canvas, fit = false }) {
   const [status, setStatus] = useState('loading');
+  const Frame = fit ? WhiteboardFitFrame : 'div';
   return (
-    <div className="relative mx-auto flex w-full items-center justify-center overflow-hidden rounded-md border border-line-1 bg-page" style={previewStyle(canvas)}>
+    <Frame {...(fit ? { canvas } : { style: previewStyle(canvas) })} className="relative mx-auto flex w-full items-center justify-center overflow-hidden rounded-md border border-line-1 bg-page">
       <img src={src} alt={alt} onLoad={() => setStatus('ready')} onError={() => setStatus('failed')} className={cn('h-full w-full object-contain', status === 'failed' && 'hidden')} />
       {status === 'loading' ? <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 bg-page text-sm text-fg-3"><Loader2 size={16} className="animate-spin" />正在加载{label}...</div> : null}
       {status === 'failed' ? <p role="alert" className="m-0 p-5 text-center text-sm leading-6 text-danger">图片读取失败，请关闭详情后重试，并检查本地文件是否完整。</p> : null}
-    </div>
+    </Frame>
   );
 }
 
@@ -83,10 +86,14 @@ function SceneVideo({ src, canvas }) {
 
 export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderOpenFile, fileStatus, onFileContextChange,
   onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false,
-  onSaveLineartPrompt, promptSavingDisabled = false, onDetailsOpenChange }) {
+  onSaveLineartPrompt, promptSavingDisabled = false, onDetailsOpenChange, onSaveAnnotation, annotationSavingDisabled = false }) {
   const [selectedSceneId, setSelectedSceneId] = useState('');
   const [promptSaving, setPromptSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [annotationDirty, setAnnotationDirty] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const triggerRef = useRef(null);
+  const viewportRef = useRef(null);
   const settings = STAGES[stage];
   const selectedIndex = scenes.findIndex(scene => scene.sceneId === selectedSceneId);
   const selected = scenes[selectedIndex];
@@ -95,16 +102,18 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
   const hasRequestDetails = scene => stage === 'annotation_drafting' && Boolean(scene.attempt);
   const hasPrompt = scene => stage === 'lineart_generation' && Boolean(scene.prompt?.imagePrompt);
   useEffect(() => () => onDetailsOpenChange?.(false), [onDetailsOpenChange]);
+  useEffect(() => { if (viewportRef.current) viewportRef.current.scrollTop = 0; }, [selectedSceneId, editing]);
 
   function openScene(scene, event) {
     if (!getUrl(scene[settings.file]) && !hasRequestDetails(scene) && !hasPrompt(scene)) return;
-    if (scene.kind === 'annotation_coverage_review' && onReviewLowCoverage) {
+    if (scene.kind === 'annotation_coverage_review' && onReviewLowCoverage && !onSaveAnnotation) {
       if (!actionsDisabled) onReviewLowCoverage();
       return;
     }
     triggerRef.current = event.target.closest('button') || event.currentTarget.querySelector('button');
     onFileContextChange?.();
     setSelectedSceneId(scene.sceneId);
+    setEditing(false); setAnnotationDirty(false);
     onDetailsOpenChange?.(true);
   }
 
@@ -112,7 +121,10 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
 
   return (
     <Dialog open={Boolean(selected)} onOpenChange={open => {
-      if (!open && !promptSaving) { setSelectedSceneId(''); onDetailsOpenChange?.(false); }
+      if (!open && !promptSaving) {
+        if (annotationDirty) { setDiscardOpen(true); return; }
+        setSelectedSceneId(''); onDetailsOpenChange?.(false);
+      }
     }}>
       <div className="grid min-w-0 gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-fg-3">
@@ -154,7 +166,10 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
       </div>
 
       <DialogContent
+        style={stage === 'annotation_drafting' ? { height: '90dvh' } : undefined}
         showCloseButton={!promptSaving}
+        onInteractOutside={event => { if (discardOpen || promptSaving) event.preventDefault(); }}
+        onEscapeKeyDown={event => { if (discardOpen || promptSaving) event.preventDefault(); }}
         className="flex max-h-[90dvh] w-[min(1040px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[1040px] [&>[data-slot=dialog-close]]:grid [&>[data-slot=dialog-close]]:size-11 [&>[data-slot=dialog-close]]:place-items-center max-[760px]:[&_button]:min-h-11"
         onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus(); } }}
       >
@@ -163,7 +178,18 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
           <DialogDescription>{stage === 'annotation_drafting' && selected && !selectedHasPreview ? '查看本幕的请求结果、时间和处理建议。' : settings.description}</DialogDescription>
         </DialogHeader>
         {selected ? <>
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain p-5 max-[560px]:p-3 [&>*]:shrink-0">
+          {discardOpen ? <div role="alert" className="grid shrink-0 gap-2 border-b border-line-1 bg-surface-2 px-5 py-3 text-sm">
+            <p className="m-0">有未保存的区域修改，是否放弃并关闭？</p>
+            <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setDiscardOpen(false)}>继续编辑</Button>
+              <Button size="sm" onClick={() => { setDiscardOpen(false); setAnnotationDirty(false); setSelectedSceneId(''); onDetailsOpenChange?.(false); }}>放弃修改并关闭</Button></div>
+          </div> : null}
+          <div ref={viewportRef} data-scene-viewport className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-5 max-[560px]:p-3 [&>*]:shrink-0">
+            {stage === 'annotation_drafting' && selected.annotation && selected.image && onSaveAnnotation ? <>
+              {!editing ? <Button variant="outline" className="justify-self-start" disabled={annotationSavingDisabled} onClick={() => setEditing(true)}>拖动编辑区域</Button>
+                : <><Button variant="outline" className="justify-self-start" disabled={annotationDirty || promptSaving} onClick={() => setEditing(false)}>查看已保存预览</Button>
+                  <WhiteboardAnnotationEditor key={selected.sceneId} scene={selected} annotationUrl={getUrl(selected.annotation)} imageUrl={getUrl(selected.image)}
+                    disabled={annotationSavingDisabled} onSave={onSaveAnnotation} onDirtyChange={setAnnotationDirty} onSavingChange={setPromptSaving} /></>}
+            </> : null}
             {hasPrompt(selected) ? <WhiteboardLineartPromptEditor key={selected.sceneId} scene={selected} onSave={onSaveLineartPrompt}
               disabled={promptSavingDisabled} onSavingChange={setPromptSaving} /> : null}
             {stage === 'lineart_generation' && !selectedHasPreview ? <p className="m-0 rounded-md border border-line-1 bg-surface-2 p-3 text-sm leading-6 text-fg-3">
@@ -171,11 +197,11 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
                 ? '可以先保存提示词，仍需核实外部结果后授权新请求。'
                 : selected.attempt?.status === 'failed' ? '可以调整并保存提示词，再继续制作。' : '提示词已可查看和编辑。'}
             </p> : null}
-            {selectedHasPreview ? <>{stage === 'scene_render'
+            {selectedHasPreview && !editing ? <>{stage === 'scene_render'
               ? <SceneVideo key={getUrl(selected.video)} src={getUrl(selected.video)} canvas={canvas} />
               : stage === 'annotation_drafting' && selected.resultPreview && selected.coverage?.coverageRatio < 0.97
               ? <WhiteboardCoverageImages scene={selected} canvas={canvas} getUrl={getUrl} />
-              : <SceneImage key={getUrl(selected[settings.file])} src={getUrl(selected[settings.file])} alt={`${titleFor(selected, selectedIndex)}${settings.label}`} label={settings.label} canvas={canvas} />}
+              : <SceneImage key={getUrl(selected[settings.file])} src={getUrl(selected[settings.file])} alt={`${titleFor(selected, selectedIndex)}${settings.label}`} label={settings.label} canvas={canvas} fit={stage === 'annotation_drafting'} />}
             {stage === 'lineart_generation' && selected.imageTexts ? <div className="grid gap-1 text-xs leading-6 text-fg-3"><strong className="text-fg-2">画内原文核对</strong><p className="m-0 break-words">{selected.imageTexts.length ? selected.imageTexts.map(text => `「${text}」`).join('、') : '本幕不添加文字'}</p><p className="m-0">请核对错字、漏字和额外文字，确认后继续落墨编排。</p></div> : null}
             {stage === 'annotation_drafting' ? <div className="grid gap-2 text-xs leading-6 text-fg-3">
               <p className="m-0">{sceneSummary(stage, selected)}。区域按编号依次完成描线与添彩，末尾保留至少半秒。</p>

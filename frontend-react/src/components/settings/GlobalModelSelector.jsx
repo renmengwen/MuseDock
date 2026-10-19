@@ -4,15 +4,16 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from '@/components/ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { Switch } from '@/components/ui/switch.jsx';
-import { BUILTIN_FIRERED_REF, DEFAULT_FIRERED_BASE_URL } from './modelDefaults.js';
+import { BUILTIN_FIRERED_REF, DEFAULT_FIRERED_BASE_URL, BUILTIN_INDEXTTS_REF } from './modelDefaults.js';
 
 const MODEL_SELECTOR_HELP_TEXT = {
   image: '当前图片生成仅支持火山方舟 Seedream 4.0-5.0 以及 OpenAI gpt-image-2。',
-  tts: '支持小米 MiMo、MiniMax 与豆包 Seed Audio。线稿白板的完整旁白使用豆包或 MiniMax 的原生字幕。',
+  tts: '默认 IndexTTS 2.5＋FireRed 真实声学时间戳；也支持 MiMo、MiniMax 与豆包 Seed Audio。',
 };
 
 export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, activeModels, onChange,
   analysisStreaming = false, onAnalysisStreamingChange,
+  localIndexTts, onLocalIndexTtsChange,
   localFireRed, onLocalFireRedBaseUrlChange, onLocalFireRedPythonPathChange, onLocalFireRedModelCacheChange, disabled = false }) {
   return (
     <section className="mb-4 rounded-lg border border-[#e7e9ee] bg-white p-4">
@@ -30,14 +31,15 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
           return (
             <div className="grid content-start gap-1.5 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3" key={type}>
               <label htmlFor={`global-model-${type}`} className="text-xs font-semibold text-[#5f6876]">{info.title}</label>
-              {type === 'asr' ? (
+              {['asr', 'tts'].includes(type) ? (
                 <Select value={value} disabled={disabled} onValueChange={ref => {
                   const [providerId, modelType] = ref.split('/');
                   onChange(type, providerId, modelType);
                 }}>
-                  <SelectTrigger id={`global-model-${type}`} className="h-[38px] bg-white"><SelectValue placeholder="选择 ASR 转写模型" /></SelectTrigger>
+                  <SelectTrigger id={`global-model-${type}`} className="h-[38px] bg-white"><SelectValue placeholder={type === 'tts' ? '选择配音模型' : '选择 ASR 转写模型'} /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={BUILTIN_FIRERED_REF}>FireRed（本地，默认）</SelectItem>
+                    {type === 'asr' ? <SelectItem value={BUILTIN_FIRERED_REF}>FireRed（本地，默认）</SelectItem>
+                      : <SelectItem value={BUILTIN_INDEXTTS_REF}>IndexTTS 2.5＋FireRed（本地，默认）</SelectItem>}
                     {providerList.map(p => {
                       const model = p.models[type];
                       return <SelectItem key={p.id} value={`${p.id}/${type}`} disabled={!model?.enabled || !model?.modelId}>
@@ -127,6 +129,28 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
               ) : null}
               {current ? (
                 <span className="text-xs text-[#69717e]">{current.providerName} / {current.modelId}</span>
+              ) : null}
+              {type === 'tts' && value === BUILTIN_INDEXTTS_REF ? (
+                <Dialog>
+                  <DialogTrigger asChild><Button variant="outline" size="sm" disabled={disabled}><Settings2 />本地配音设置</Button></DialogTrigger>
+                  <DialogContent className="max-h-[85vh] overflow-y-auto">
+                    <DialogHeader><DialogTitle>IndexTTS 本地配音设置</DialogTitle>
+                      <DialogDescription>使用已有的 IndexTTS 2.5 CPU 环境。修改后点击页面上方“保存模型配置”。</DialogDescription></DialogHeader>
+                    <div className="grid gap-4">
+                      {[['rootPath', 'IndexTTS 安装目录（包含 repo 和 .venv）'], ['pythonPath', 'Python 路径（可选，默认安装目录内 .venv）'],
+                        ['referenceAudio', '参考干声音频的完整路径'], ['durationFactor', '时长系数（0.5–2，越大越慢）'],
+                        ['maxTextTokens', '分段 Token 上限（20–200，默认 120）'], ['threads', 'CPU 线程数（1–16）']].map(([key, label]) => (
+                        <div className="grid gap-1.5" key={key}>
+                          <label className="text-sm font-medium" htmlFor={`indextts-${key}`}>{label}</label>
+                          <Input id={`indextts-${key}`} value={localIndexTts?.[key] ?? ''} disabled={disabled}
+                            onChange={event => onLocalIndexTtsChange?.(key, event.target.value)} />
+                        </div>
+                      ))}
+                      <p className="text-xs leading-5 text-muted-foreground">音频生成后使用 FireRed 独立识别和 CTC 声学对齐，不是 IndexTTS 原生字幕。请先运行 npm run setup:asr；FireRed 路径与地址沿用 ASR 卡片的本地服务设置。CPU 合成可能需要数分钟，识别与正文不一致时会保留音频并停止。</p>
+                    </div>
+                    <DialogFooter><DialogClose asChild><Button variant="outline">关闭</Button></DialogClose></DialogFooter>
+                  </DialogContent>
+                </Dialog>
               ) : null}
               {MODEL_SELECTOR_HELP_TEXT[type] ? (
                 <span className="text-[11px] font-semibold leading-5 text-[#69717e]">

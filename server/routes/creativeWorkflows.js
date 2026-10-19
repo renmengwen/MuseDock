@@ -348,8 +348,10 @@ router.get('/:workflow_id/whiteboard/media/:artifact_id', async (req, res) => {
   if (!result.success) return res.status(getStatusCode(result)).json(result);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-  res.type(result.artifact.mime || 'application/octet-stream');
-  if (req.query.download === '1') return res.download(result.file_path, result.artifact.fileName);
+  const audioType = await require('../services/tts/audioMime').audioResponseType(result.file_path, result.artifact);
+  res.type(audioType.mime);
+  if (req.query.download === '1') return res.download(result.file_path,
+    audioType.extension ? result.artifact.fileName.replace(/\.[^.]+$/, '') + audioType.extension : result.artifact.fileName);
   return res.sendFile(result.file_path);
 });
 

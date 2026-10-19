@@ -13,11 +13,13 @@ const aiTtsModel = require('../../ai/aiTtsModel');
 const appSettings = require('../../appSettings');
 const { ensureWhiteboardConcurrency } = require('./concurrency');
 const { recoverableAnnotationAttempts, recoverAnnotationPreviews } = require('./annotationRecovery');
+const { saveAnnotation } = require('./annotationEditing');
 const { safeVisionDiagnostics } = require('./visionDiagnostics');
 const { scenePrompt, validatePrompt } = require('./lineartPrompts');
 const { recordRun, recordFailure, failureDetails } = require('../../diagnostics/taskDiagnosticRecords');
 
 const COVERAGE_GATE = 'annotation_coverage_review';
+const { reviewableAttempt, acceptNarration } = require('./narrationAcceptance');
 
 function hasCoverageReview(media) {
   return media.stage === 'annotation_drafting' && !media.current.annotation_drafting && media.lowCoverage?.length > 0;
@@ -51,7 +53,8 @@ async function voiceSnapshot(services = {}) {
     service: { contractVersion: 2, configured, provider: runtime.provider,
       displayName: configured ? (config.providerName || (runtime.provider === 'doubao' ? '豆包 Seed Audio' : '当前旁白服务')) : '未配置',
       contractHash: configured ? sha256({ provider: runtime.provider, model: runtime.modelId,
-        endpoint: runtime.baseUrl, voice: runtime.provider === 'doubao' ? runtime.doubao : runtime.voiceId }) : '' },
+        endpoint: runtime.baseUrl, voice: runtime.provider === 'doubao' ? runtime.doubao : runtime.voiceId,
+        ...(runtime.provider === 'indextts' ? { localIndexTts: runtime.localIndexTts, alignment: runtime.alignmentConfig } : {}) }) : '' },
   };
 }
 
@@ -61,7 +64,10 @@ function actionsFor(record) {
     && record.whiteboard.current?.identity === media.planIdentity && !record.whiteboard.initialApproval?.stale
     && !record.whiteboard.pendingInitialApproval && record.whiteboard.initialApproval?.identity === media.planIdentity;
   const actions = stageActionsFor(record);
-  return canSavePrompt ? [{ id: 'save_lineart_prompt', label: '保存线稿提示词' }, ...(actions || [])] : actions;
+  const canEditAnnotation = canSavePrompt && !media.executionId && ['waiting_approval', 'failed', 'done'].includes(record.status)
+    && (Object.keys(media.annotations || {}).length || media.lowCoverage?.length);
+  return canSavePrompt ? [{ id: 'save_lineart_prompt', label: '保存线稿提示词' },
+    ...(canEditAnnotation ? [{ id: 'save_annotation', label: '保存落墨编排' }] : []), ...(actions || [])] : actions;
 }
 
 function stageActionsFor(record) {
@@ -77,6 +83,7 @@ function stageActionsFor(record) {
     { id: 'retry_media', label: '重新编排未通过的幕' },
   ];
   if (record.status === 'failed') return [
+    ...(reviewableAttempt(media) ? [{ id: 'accept_narration', label: '确认音频并继续制作', requiresConfirmation: true }] : []),
     ...(recoverableAnnotationAttempts(media).length
       ? [{ id: 'recover_annotation_preview', label: '恢复落墨预览' }] : []),
     { id: 'retry_media', label: '继续未完成的制作' },
@@ -240,7 +247,7 @@ async function act(record, payload, options, now) {
     const runtime = await tools.preflight({ ...options.mediaOptions, opening: artifact.opening, openingPlaybackMode: artifact.productionPlan.openingPlaybackMode, aspectRatio: artifact.aspectRatio || '16:9', bgmMode: artifact.productionPlan.bgmMode, visualStyle: artifact.visualStyle });
     const { service, runtime: voice, legacyContractHash } = await voiceSnapshot(options.services);
     if (!silent) {
-      if (!service.configured || !['doubao', 'minimax'].includes(voice.provider)) throw new WhiteboardError('TTS_NOT_CONFIGURED', '完整白板旁白需要豆包 Seed Audio 或 MiniMax 原生字幕。请在设置中配置 TTS，再调整制作设置并重新确认方案。');
+      if (!service.configured || !['doubao', 'minimax', 'indextts'].includes(voice.provider)) throw new WhiteboardError('TTS_NOT_CONFIGURED', '完整白板旁白需要 IndexTTS＋FireRed 声学对齐，或豆包、MiniMax 原生字幕。请在设置中配置 TTS，再调整制作设置并重新确认方案。');
       if (artifact.narrationService.contractVersion === 2 && service.contractHash !== artifact.narrationService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白设置已变化，请更新制作设置并重新确认当前方案。', 409);
       if (artifact.narrationService.contractVersion !== 2 && artifact.narrationService.contractHash !== legacyContractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旧方案的旁白设置已变化，请更新制作设置并重新确认。', 409);
       if (voice.provider === 'doubao' && artifact.durationMs + narrationOpeningDurationMs(artifact) > 120000) throw new WhiteboardError('TTS_INPUT_INVALID', '豆包整轨旁白最多支持 120 秒（含提问开场），请调整方案时长。');
@@ -261,6 +268,43 @@ async function act(record, payload, options, now) {
   if (action === 'save_lineart_prompt') return saveLineartPrompt(record, artifact, payload, now);
   if (payload.expectedMediaIdentity !== store.mediaIdentity(media)
     || (media.interactionId && payload.interactionId !== media.interactionId)) throw new WhiteboardError('STALE_IDENTITY', '媒体版本或待确认卡片已变化，请刷新后检查当前产物。', 409);
+  if (action === 'save_annotation') {
+    const timing = await saveAnnotation(record, artifact, payload, options, now);
+    delete media.scenes[payload.sceneId];
+    for (const stage of store.STAGES.slice(2)) {
+      delete media.current[stage.id];
+      Object.assign(media.stages.find(item => item.id === stage.id), { status: 'pending', message: '' });
+      media.approvals.filter(item => item.gate === store.GATES[stage.id]).forEach(item => { item.stale = true; });
+    }
+    delete media.annotationProgress;
+    delete media.sceneRenderProgress;
+    record.result = null;
+    media.revision += 1;
+    expireInteraction(record, 'superseded', now);
+    media.stage = 'annotation_drafting';
+    media.gate = ''; media.interactionId = ''; media.activeAttemptId = '';
+    if (hasCoverageReview(media)) waitForCoverageReview(record, now);
+    else if (timing.scenes.every(scene => media.annotations[scene.id])) {
+      for (const scene of timing.scenes) await store.validateBinding(record, media.annotations[scene.id], options.rootDir);
+      media.current.annotation_drafting = store.bind({ kind: 'annotation_bundle', scenes: timing.scenes.map(scene => media.annotations[scene.id]) });
+      media.gate = store.GATES.annotation_drafting;
+      const interaction = { id: crypto.randomUUID(), kind: 'media_review', stage: media.gate,
+        title: '落墨编排已保存，请检查更新后的区域与顺序', status: 'pending', createdAt: now,
+        expectedAttemptId: record.whiteboard.attempts.at(-1).id, expectedIdentity: record.whiteboard.current.identity,
+        artifactIdentity: media.current.annotation_drafting.identity };
+      record.whiteboard.interactions.push(interaction);
+      media.interactionId = interaction.id;
+      setState(record, 'waiting_approval', interaction.title, now);
+      message(record, 'assistant', interaction.title, now, interaction.id);
+    } else {
+      const text = '本幕落墨编排已保存，其他未完成的分镜可继续制作。';
+      record.error = { code: 'ANNOTATION_DRAFT_INCOMPLETE', message: text };
+      setState(record, 'failed', text, now);
+    }
+    record.task_status = record.status;
+    message(record, 'user', '已手动调整并保存落墨区域，更新本地预览。', now);
+    return false;
+  }
   if (action === 'recover_annotation_preview') {
     const count = await recoverAnnotationPreviews(record, artifact, options, now, payload.sceneId);
     message(record, 'user', '使用已保存的编排恢复落墨预览，保留当前接受决定。', now);
@@ -278,6 +322,13 @@ async function act(record, payload, options, now) {
     await validateCurrent(record, media.stage, options);
     message(record, 'user', payload.message || '确认当前媒体产物，继续制作。', now, media.interactionId);
     return approve(record, 'user', 'user_review_current_artifact', now);
+  }
+  if (action === 'accept_narration') {
+    const voice = await voiceSnapshot(options.services);
+    if (voice.service.contractHash !== media.voiceService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '声音设置已变化，请恢复本次声音设置后再确认已试听音频。', 409);
+    await acceptNarration(record, artifact, payload, options, now);
+    message(record, 'user', '已试听并接受本次旁白及文字差异；按确认正文校订字幕，保留原始识别和声学边界，继续制作。', now);
+    return approve(record, 'user', 'user_review_narration_text_differences', now);
   }
   if (action === 'authorize_media_retry' && payload.confirmed !== true) throw new WhiteboardError('EXTERNAL_AUTH_REQUIRED', '需要明确同意新请求及可能的重复费用。', 409);
   if (action === 'authorize_media_retry' && media.stage === 'annotation_drafting') {

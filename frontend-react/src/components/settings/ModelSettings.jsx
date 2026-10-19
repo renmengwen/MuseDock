@@ -41,6 +41,8 @@ export function ModelSettings({ modelSettings }) {
         analysisStreaming={modelSettings.state.analysisStreaming}
         onAnalysisStreamingChange={modelSettings.setAnalysisStreaming}
         localFireRed={modelSettings.state.localFireRed}
+        localIndexTts={modelSettings.state.localIndexTts}
+        onLocalIndexTtsChange={modelSettings.setLocalIndexTts}
         onLocalFireRedBaseUrlChange={modelSettings.setLocalFireRedBaseUrl}
         onLocalFireRedPythonPathChange={modelSettings.setLocalFireRedPythonPath}
         onLocalFireRedModelCacheChange={modelSettings.setLocalFireRedModelCache}

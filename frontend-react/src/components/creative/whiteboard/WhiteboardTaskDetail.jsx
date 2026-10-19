@@ -18,6 +18,8 @@ import { ProductionPlanFields } from './WhiteboardInputFields.jsx';
 import { WhiteboardArtifact } from './WhiteboardArtifact.jsx';
 import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
+import { WhiteboardNarrationReview } from './WhiteboardNarrationReview.jsx';
+import { retainedNarrationAttempts } from './narrationReviewFiles.js';
 import { WhiteboardCoverageReview } from './WhiteboardCoverageReview.jsx';
 import { whiteboardCanvasLabel, validateSubtitleSettings } from './whiteboardForm.js';
 import { ApiCallLogLink } from '@/components/diagnostics/ApiCallLogLink.jsx';
@@ -40,6 +42,8 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const [historyBusy, setHistoryBusy] = useState('');
   const [historyError, setHistoryError] = useState('');
   const [progressOpen, setProgressOpen] = useState(false);
+  const [narrationReviewOpen, setNarrationReviewOpen] = useState(false);
+  const [narrationReviewSnapshot, setNarrationReviewSnapshot] = useState(null);
   const [streamReply, setStreamReply] = useState({ phase: '', text: '' });
   const actionLock = useRef(false);
   const historyRequest = useRef(0);
@@ -47,6 +51,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const progressTrigger = useRef(null);
   const whiteboard = workflow.whiteboard;
   const media = whiteboard.media && !whiteboard.media.stale ? whiteboard.media : null;
+  const retainedNarration = retainedNarrationAttempts(media);
   const interactions = whiteboard.interactions || [];
   const pendingInteraction = interactions.findLast(item => item.status === 'pending');
   const current = whiteboard.current;
@@ -87,6 +92,18 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     setError('');
     setConfirm('accept_low_coverage');
   }
+  function openNarrationReview() {
+    setNarrationReviewSnapshot({ attempts: structuredClone(retainedNarration), identity: media?.identity,
+      planIdentity: current?.identity, planAttemptId: latest?.id, interactionId: media?.interactionId });
+    setError(''); setNarrationReviewOpen(true);
+  }
+  function acceptNarration(attempt) {
+    const snapshot = narrationReviewSnapshot;
+    if (!snapshot) return;
+    return act('accept_narration', { confirmed: true, narrationAttemptId: attempt.id, audioSha256: attempt.raw.sha256,
+      reviewSha256: attempt.review.sha256, expectedMediaIdentity: snapshot.identity, expectedIdentity: snapshot.planIdentity,
+      expectedAttemptId: snapshot.planAttemptId, interactionId: snapshot.interactionId });
+  }
 
   async function act(action, extras = {}) {
     if (actionLock.current || locked || (!allowed.has(action) && !(action === 'message' && canMessage))) return;
@@ -111,6 +128,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       if (['revise', 'revise_media', 'message'].includes(action)) setRevision('');
       setConfirm('');
       setPlanOpen(false);
+      if (action === 'accept_narration') setNarrationReviewOpen(false);
     } catch (failure) {
       setError(failure?.data?.message || failure?.message || '操作失败，请刷新当前任务后重试。');
     } finally {
@@ -118,6 +136,16 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       setBusy('');
       setStreamReply({ phase: '', text: '' });
     }
+  }
+
+  async function saveAnnotation(sceneId, edit) {
+    if (actionLock.current || locked || !allowed.has('save_annotation')) throw new Error('当前无法保存编排，请等待正在执行的制作结束后重试。');
+    actionLock.current = true; setBusy('save_annotation');
+    try {
+      const result = await sendAction('save_annotation', { sceneId, ...edit });
+      if (!result?.workflow?.whiteboard?.media) throw new Error('尚未取得保存结果，请刷新任务核对当前编排。');
+      return result;
+    } finally { actionLock.current = false; setBusy(''); }
   }
 
   async function saveLineartPrompt(sceneId, prompt) {
@@ -271,6 +299,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
             </div>
             {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
             {needsAttention || error ? <div><ApiCallLogLink workflowId={workflow.workflow_id} label="查看 API 返回结果" /></div> : null}
+            {retainedNarration.length ? <Button variant="outline" onClick={openNarrationReview}>试听并核对旁白</Button> : null}
             {error || workflow.error ? <Link to="/settings" state={{ from: `/creative/${workflow.workflow_id}` }} className="text-sm font-semibold text-ink underline underline-offset-4">打开模型与声音设置</Link> : null}
 
             {canMessage ? (
@@ -285,6 +314,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {allowed.has('update_plan') && artifact && (!pendingInteraction || media) ? <Button type="button" variant="outline" disabled={locked} onClick={() => { setEditedPlan({ ...artifact.productionPlan }); setEditedOpening(openingFormValue(artifact)); setPlanOpen(true); setError(''); }}><Settings2 size={14} />制作设置</Button> : null}
               {allowed.has('start_production') ? <Button type="button" disabled={locked} onClick={() => act('start_production')}>开始制作视频</Button> : null}
               {allowed.has('recover_annotation_preview') ? <Button type="button" disabled={locked} onClick={() => act('recover_annotation_preview')}>恢复落墨预览</Button> : null}
+              {allowed.has('accept_narration') ? <Button type="button" disabled={locked} onClick={openNarrationReview}>确认音频并继续制作</Button> : null}
               {allowed.has('retry_media') ? <Button type="button" variant={allowed.has('accept_low_coverage') ? 'outline' : 'default'} disabled={locked} onClick={() => act('retry_media')}>{whiteboard.allowedActions.find(action => action.id === 'retry_media').label}</Button> : null}
               {allowed.has('accept_low_coverage') ? <Button type="button" variant="outline" disabled={locked} onClick={openCoverageReview}>查看预览后接受当前落墨</Button> : null}
               {allowed.has('authorize_media_retry') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('authorize_media_retry')}>核实后授权新请求</Button> : null}
@@ -310,6 +340,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {media ? <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={allowed.has('accept_low_coverage') ? openCoverageReview : undefined}
                 onRecoverAnnotationPreview={allowed.has('recover_annotation_preview') ? sceneId => act('recover_annotation_preview', { sceneId }) : undefined}
                 recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked}
+                onSaveAnnotation={saveAnnotation} annotationSavingDisabled={locked || !allowed.has('save_annotation')}
                 onSaveLineartPrompt={saveLineartPrompt} promptSavingDisabled={Boolean(busy) || Boolean(deletingWorkflowId) || !allowed.has('save_lineart_prompt')} /> : <WhiteboardArtifact artifact={artifact} />}
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
@@ -386,6 +417,15 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
             )}
             {historyError ? <p className="text-sm text-danger" role="alert">{historyError}</p> : null}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={narrationReviewOpen} onOpenChange={setNarrationReviewOpen}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>试听并核对旁白</DialogTitle><DialogDescription>本次音频已保留。先听差异位置，再决定如何处理。</DialogDescription></DialogHeader>
+          {(narrationReviewSnapshot?.attempts || []).map((attempt, index) => <WhiteboardNarrationReview key={attempt.id} attempt={attempt}
+            onAccept={index === 0 && allowed.has('accept_narration') && narrationReviewSnapshot.identity === media?.identity && !running ? acceptNarration : undefined}
+            accepting={locked} acceptError={error} />)}
         </DialogContent>
       </Dialog>
 

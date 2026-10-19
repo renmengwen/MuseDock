@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
-import { BUILTIN_FIRERED_REF, DEFAULT_FIRERED_BASE_URL } from '../components/settings/modelDefaults.js';
+import { BUILTIN_FIRERED_REF, DEFAULT_FIRERED_BASE_URL, BUILTIN_INDEXTTS_REF, DEFAULT_INDEXTTS } from '../components/settings/modelDefaults.js';
 
 const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
@@ -51,7 +51,8 @@ function normalizeServerData(json) {
   }
   return {
     providers,
-    active: { ...json.active, asr: json.active?.asr || BUILTIN_FIRERED_REF },
+    active: { ...json.active, asr: json.active?.asr || BUILTIN_FIRERED_REF, tts: json.active?.tts || BUILTIN_INDEXTTS_REF },
+    localIndexTts: { ...DEFAULT_INDEXTTS, ...json.localIndexTts },
     skipValidation: !!json.skipValidation,
     analysisStreaming: json.analysisStreaming === true,
     localFireRed: { baseUrl: json.localFireRed?.baseUrl || DEFAULT_FIRERED_BASE_URL,
@@ -86,11 +87,12 @@ function toServerPayload(state) {
     };
   }
   return { providers, active: state.active, skipValidation: state.skipValidation,
-    analysisStreaming: state.analysisStreaming, localFireRed: state.localFireRed };
+    analysisStreaming: state.analysisStreaming, localFireRed: state.localFireRed, localIndexTts: state.localIndexTts };
 }
 
 export function useSettings() {
-  const [state, setState] = useState({ providers: {}, active: { asr: BUILTIN_FIRERED_REF }, skipValidation: false, analysisStreaming: false,
+  const [state, setState] = useState({ providers: {}, active: { asr: BUILTIN_FIRERED_REF, tts: BUILTIN_INDEXTTS_REF }, skipValidation: false, analysisStreaming: false,
+    localIndexTts: { ...DEFAULT_INDEXTTS },
     localFireRed: { baseUrl: DEFAULT_FIRERED_BASE_URL, pythonPath: '', modelCache: '' } });
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -113,6 +115,10 @@ export function useSettings() {
     const result = {};
     for (const type of MODEL_TYPES) {
       const ref = state.active[type];
+      if (type === 'tts' && ref === BUILTIN_INDEXTTS_REF) {
+        result[type] = { ref, builtin: true, providerId: 'builtin', providerName: 'IndexTTS（本地）', enabled: true, modelId: 'IndexTTS-2.5' };
+        continue;
+      }
       if (type === 'asr' && ref === BUILTIN_FIRERED_REF) {
         result[type] = { ref, builtin: true, providerId: 'builtin', providerName: 'FireRed（本地）',
           enabled: true, modelId: 'fireredasr2-aed', backend: 'firered' };
@@ -180,7 +186,7 @@ export function useSettings() {
       const newActive = { ...prev.active };
       for (const type of MODEL_TYPES) {
         if (newActive[type]?.startsWith(providerId + '/')) {
-          newActive[type] = type === 'asr' ? BUILTIN_FIRERED_REF : '';
+          newActive[type] = type === 'asr' ? BUILTIN_FIRERED_REF : type === 'tts' ? BUILTIN_INDEXTTS_REF : '';
         }
       }
       return { ...prev, providers: newProviders, active: newActive };
@@ -193,7 +199,7 @@ export function useSettings() {
       ...prev,
       active: {
         ...prev.active,
-        [modelType]: providerId && modelTypeKey ? `${providerId}/${modelTypeKey}` : modelType === 'asr' ? BUILTIN_FIRERED_REF : '',
+        [modelType]: providerId && modelTypeKey ? `${providerId}/${modelTypeKey}` : modelType === 'asr' ? BUILTIN_FIRERED_REF : modelType === 'tts' ? BUILTIN_INDEXTTS_REF : '',
       },
     }));
   }, []);
@@ -224,11 +230,15 @@ export function useSettings() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  const setLocalIndexTts = useCallback((key, value) => {
+    setDirty(true);
+    setState(prev => ({ ...prev, localIndexTts: { ...prev.localIndexTts, [key]: value } }));
+  }, []);
 
   return {
     state, providerList, activeModels, enabledCount,
     status, loading, saving, dirty,
-    load, save,
+    load, save, setLocalIndexTts,
     saveProvider, removeProvider,
     setActive, setSkipValidation, setAnalysisStreaming, setLocalFireRedBaseUrl, setLocalFireRedPythonPath, setLocalFireRedModelCache,
     MODEL_TYPES, MODEL_TYPE_INFO,

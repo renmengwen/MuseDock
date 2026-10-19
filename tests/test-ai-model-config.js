@@ -10,12 +10,12 @@ async function run() {
 
   // Test 1: empty config returns default structure
   const initial = await aiModelConfig.getPublicConfig({ configPath });
-  assert.deepStrictEqual(Object.keys(initial), ['providers', 'active', 'skipValidation', 'analysisStreaming', 'localAsr', 'localFireRed']);
+  assert.deepStrictEqual(Object.keys(initial), ['providers', 'active', 'skipValidation', 'analysisStreaming', 'localAsr', 'localFireRed', 'localIndexTts']);
   assert.deepStrictEqual(initial.providers, {});
   assert.strictEqual(initial.skipValidation, false);
   assert.strictEqual(initial.analysisStreaming, false);
   for (const type of aiModelConfig.MODEL_TYPES) {
-    assert.strictEqual(initial.active[type], type === 'asr' ? aiModelConfig.BUILTIN_FIRERED_REF : '');
+    assert.strictEqual(initial.active[type], type === 'asr' ? aiModelConfig.BUILTIN_FIRERED_REF : type === 'tts' ? aiModelConfig.BUILTIN_INDEXTTS_REF : '');
   }
   assert.deepStrictEqual(initial.localAsr, { baseUrl: 'http://127.0.0.1:8000/v1', pythonPath: '', modelCache: '' });
   const defaultAsr = await aiModelConfig.getRuntimeConfig('asr', { configPath });
